@@ -1,7 +1,7 @@
 #!/bin/bash
 # This script scrapes a list of domains, resolves their IP addresses,
 # and packages the scraped websites along with a generated websites.txt file.
-# It now displays a progress indicator for processing the list.
+# It now displays a progress indicator for processing the list and includes a 5-second timeout for each wget command.
 #
 # Usage: ./scrape_and_package.sh domains_list.txt
 
@@ -42,10 +42,11 @@ while IFS= read -r domain; do
   DOMAIN_DIR="$SCRAPE_ROOT/$domain"
   mkdir -p "$DOMAIN_DIR"
 
-  # Scrape the website using wget.
-  # Uncomment the --progress option if you want wget's built-in progress for each download.
-  wget --mirror --convert-links --adjust-extension --page-requisites --no-parent -l 1 "http://$domain" -P "$DOMAIN_DIR"
-  # --progress=bar:force
+  # Use timeout to limit wget to 5 seconds and limit recursion to 2 levels
+  if ! timeout 5s wget --mirror --convert-links --adjust-extension --page-requisites --no-parent -l 2 "http://$domain" -P "$DOMAIN_DIR"; then
+    echo -e "\nTimeout reached for $domain, skipping..."
+    continue
+  fi
 
   # Resolve the domain to an IP address (using dig, with fallback to host)
   ip=$(dig +short "$domain" | head -n 1)
@@ -57,6 +58,7 @@ while IFS= read -r domain; do
   if [ -n "$ip" ]; then
     echo "$domain,$ip" >> "$SCRAPE_ROOT/$WEBSITES_FILE"
   fi
+
 done < "$DOMAINS_FILE"
 
 # Finish the progress line with a newline
