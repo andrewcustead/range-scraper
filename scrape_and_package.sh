@@ -44,7 +44,7 @@ while IFS= read -r domain; do
 
   # Scrape the website using wget.
   # Uncomment the --progress option if you want wget's built-in progress for each download.
-  wget --mirror --convert-links --adjust-extension --page-requisites --no-parent -l 2 "http://$domain" -P "$DOMAIN_DIR"
+  wget --mirror --convert-links --adjust-extension --page-requisites --no-parent -l 1 "http://$domain" -P "$DOMAIN_DIR"
   # --progress=bar:force
 
   # Resolve the domain to an IP address (using dig, with fallback to host)
