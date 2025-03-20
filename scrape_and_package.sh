@@ -45,16 +45,18 @@ while IFS= read -r domain; do
   # Use wget with the following options:
   #   -r       : recursive download.
   #   -l 2     : limit recursion to 2 levels.
-  #   -p       : download all page requisites (images, CSS, etc.).
+  #   -p       : download all page requisites (images, CSS, fonts, etc.).
   #   -k       : convert links for local viewing.
   #   -E       : adjust extensions (e.g., save HTML files with .html extension).
   #   --no-parent : do not ascend to parent directories.
   #   -nH      : do not create a directory named the host.
-  #   -U      : set a modern browser user-agent string.
+  #   -U       : set a modern browser user-agent string.
+  #   --wait=2 --random-wait : adds a delay between requests to avoid overwhelming the server.
   #
-  # The timeout command ensures that if wget hangs for more than 5 seconds, it skips that domain.
-  if ! timeout 30s wget -r -l 1 -p -k -E --no-parent -nH -U "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36" -P "$DOMAIN_DIR" "http://$domain" ; then
-    echo -e "\nTimeout reached for $domain, skipping..."
+  # The --foreground flag with timeout ensures that wget runs in the foreground,
+  # making it responsive to Ctrl+C.
+  if ! timeout --foreground 5s wget -r -l 2 -p -k -E --no-parent -nH --wait=2 --random-wait -U "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36" -P "$DOMAIN_DIR" "http://$domain" ; then
+    echo -e "\nTimeout reached or cancelled for $domain, skipping..."
     continue
   fi
 
