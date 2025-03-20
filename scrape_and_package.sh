@@ -42,20 +42,21 @@ while IFS= read -r domain; do
   DOMAIN_DIR="$SCRAPE_ROOT/$domain"
   mkdir -p "$DOMAIN_DIR"
 
-  # Use wget with the following options:
-  #   -r       : recursive download.
-  #   -l 2     : limit recursion to 2 levels.
-  #   -p       : download all page requisites (images, CSS, fonts, etc.).
-  #   -k       : convert links for local viewing.
-  #   -E       : adjust extensions (e.g., save HTML files with .html extension).
-  #   --no-parent : do not ascend to parent directories.
-  #   -nH      : do not create a directory named the host.
-  #   -U       : set a modern browser user-agent string.
-  #   --wait=2 --random-wait : adds a delay between requests to avoid overwhelming the server.
+  # Use wget with options:
+  #   -r              : recursive download.
+  #   -l 2            : limit recursion to 2 levels.
+  #   -p              : download all page requisites (images, CSS, fonts, etc.).
+  #   -k              : convert links for local viewing.
+  #   -E              : adjust file extensions (e.g., save HTML files with .html extension).
+  #   --no-parent     : do not ascend to parent directories.
+  #   -nH             : do not create a directory named after the host.
+  #   -e robots=off   : ignore robots.txt restrictions.
+  #   --connect-timeout=5 --read-timeout=5 : set connection and read timeouts.
+  #   --wait=2 --random-wait : adds a delay between requests.
+  #   -U              : set a modern browser user-agent string.
   #
-  # The --foreground flag with timeout ensures that wget runs in the foreground,
-  # making it responsive to Ctrl+C.
-  if ! timeout --foreground 5s wget -r -l 2 -p -k -E --no-parent -nH --wait=2 --random-wait -U "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36" -P "$DOMAIN_DIR" "http://$domain" ; then
+  # Wrapping wget in a timeout of 30 seconds overall (adjust if needed).
+  if ! timeout --foreground 30s wget -r -l 1 -p -k -E --no-parent -nH -e robots=off --connect-timeout=5 --read-timeout=5 --wait=2 --random-wait -U "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36" -P "$DOMAIN_DIR" "https://$domain" ; then
     echo -e "\nTimeout reached or cancelled for $domain, skipping..."
     continue
   fi
