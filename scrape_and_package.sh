@@ -1,8 +1,7 @@
 #!/bin/bash
 # This script scrapes a list of domains, resolves their IP addresses,
 # and packages the scraped websites along with a generated websites.txt file.
-# For each domain, the files are saved under /tmp/scraped_sites/sitename.com/files.
-# It displays a progress indicator and enforces a 5-second timeout for wget.
+# For each domain, the scraped files are saved directly under /tmp/scraped_sites/sitename.com/
 #
 # Usage: ./scrape_and_package.sh domains_list.txt
 
@@ -39,40 +38,40 @@ while IFS= read -r domain; do
   # Update progress on the same line.
   printf "\rProgress: %d/%d (%s%%) - Scraping %s" "$current" "$total_domains" "$percent" "$domain"
 
-  # Create the directory for the domain with a subfolder "files".
-  DOMAIN_DIR="$SCRAPE_ROOT/$domain/files"
+  # Create the directory for the domain (directly under SCRAPE_ROOT)
+  DOMAIN_DIR="$SCRAPE_ROOT/$domain"
   mkdir -p "$DOMAIN_DIR"
 
-  # Scrape the site using wget:
-  #   --mirror           : Enable mirroring.
-  #   --convert-links    : Convert links for local viewing.
-  #   --adjust-extension : Save files with proper extensions.
-  #   --page-requisites  : Download images, CSS, fonts, etc.
-  #   --no-parent        : Do not ascend to parent directories.
-  #   -l 2               : Limit recursion to 2 levels.
-  #   -nH                : Do not create a host directory.
-  #   -P <dir>          : Set the target directory.
+  # Use wget with the following options:
+  #   -r       : recursive download.
+  #   -l 2     : limit recursion to 2 levels.
+  #   -p       : download all page requisites (images, CSS, etc.).
+  #   -k       : convert links for local viewing.
+  #   -E       : adjust extensions (e.g., save HTML files with .html extension).
+  #   --no-parent : do not ascend to parent directories.
+  #   -nH      : do not create a directory named the host.
+  #   -U      : set a modern browser user-agent string.
   #
-  # The -q option silences wget's output so the progress line remains visible.
-  if ! timeout 5s wget --mirror --convert-links --adjust-extension --page-requisites --no-parent -l 1 -nH -q -P "$DOMAIN_DIR" "http://$domain"; then
+  # The timeout command ensures that if wget hangs for more than 5 seconds, it skips that domain.
+  if ! timeout 30s wget -r -l 1 -p -k -E --no-parent -nH -U "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36" -P "$DOMAIN_DIR" "http://$domain" ; then
     echo -e "\nTimeout reached for $domain, skipping..."
     continue
   fi
 
-  # Resolve the domain to an IP address using dig; fallback to host.
+  # Resolve the domain to an IP address (using dig; fallback to host)
   ip=$(dig +short "$domain" | head -n 1)
   if [ -z "$ip" ]; then
     ip=$(host "$domain" | awk '/has address/ { print $4; exit }')
   fi
 
-  # Append the domain and its IP to websites.txt if found.
+  # Append the domain and its IP to websites.txt if an IP was found.
   if [ -n "$ip" ]; then
     echo "$domain,$ip" >> "$SCRAPE_ROOT/$WEBSITES_FILE"
   fi
 
 done < "$DOMAINS_FILE"
 
-# End the progress output.
+# Finish the progress line.
 echo -e "\nScraping complete."
 
 # Package the entire scraped_sites directory into a tar.gz archive.
