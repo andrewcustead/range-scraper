@@ -52,7 +52,9 @@ while IFS= read -r domain; do
   #   -l 2               : Limit recursion to 2 levels.
   #   -nH                : Do not create a host directory.
   #   -P <dir>          : Set the target directory.
-  if ! timeout 5s wget --mirror --convert-links --adjust-extension --page-requisites --no-parent -l 1 -nH -P "$DOMAIN_DIR" "http://$domain"; then
+  #
+  # The -q option silences wget's output so the progress line remains visible.
+  if ! timeout 5s wget --mirror --convert-links --adjust-extension --page-requisites --no-parent -l 1 -nH -q -P "$DOMAIN_DIR" "http://$domain"; then
     echo -e "\nTimeout reached for $domain, skipping..."
     continue
   fi
