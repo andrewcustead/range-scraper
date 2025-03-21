@@ -44,7 +44,7 @@ while IFS= read -r domain; do
 
   # Use wget with options:
   #   -r              : recursive download.
-  #   -l 2            : limit recursion to 2 levels.
+  #   -l 1            : limit recursion to 1 level.
   #   -p              : download all page requisites (images, CSS, fonts, etc.).
   #   -k              : convert links for local viewing.
   #   -E              : adjust file extensions (e.g., save HTML files with .html extension).
@@ -61,14 +61,15 @@ while IFS= read -r domain; do
     continue
   fi
 
-  # Resolve the domain to an IP address (using dig; fallback to host)
-  ip=$(dig +short "$domain" | head -n 1)
-  if [ -z "$ip" ]; then
-    ip=$(host "$domain" | awk '/has address/ { print $4; exit }')
+  # Resolve the domain to an IP address by querying A records.
+  ip=$(dig +short A "$domain" | head -n 1)
+  # If the result is not a valid IPv4 address, fallback to host.
+  if [[ ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    ip=$(host "$domain" | awk '/has address/ { if ($4 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $4; exit } }')
   fi
 
-  # Append the domain and its IP to websites.txt if an IP was found.
-  if [ -n "$ip" ]; then
+  # Append the domain and its IP to websites.txt only if a valid IPv4 address was obtained.
+  if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "$domain,$ip" >> "$SCRAPE_ROOT/$WEBSITES_FILE"
   fi
 
