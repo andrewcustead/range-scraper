@@ -3,7 +3,7 @@ clear
 ### Cobalt Strike variables
 CSURL="https://download.cobaltstrike.com"
 
-### User customization Variable section
+### User Customization Variable Section
 ## Change these if you don’t want to use the defaults.
 # Proxy settings for the Range.
 ProxyIP="172.30.0.2"
@@ -104,7 +104,7 @@ green="\e[1;32m"
 yellow="\e[1;32m"
 default="\e[0m"
 
-# Determine primary (anic) and secondary (gnic) network interfaces.
+# Determine primary (anic) and secondary (gnic) network interface names.
 anic=$(ip link show | grep ^2: | awk '{print $2}' | cut -d: -f1)
 if [ -z "$anic" ]; then
   echo -e "$red Error: Could not determine your first NIC.$default"
@@ -116,86 +116,46 @@ if [ -z "$gnic" ]; then
   exit 1
 fi
 
-# Archive name (assumes the tarball is in the current directory)
+# Archive name – assumes the tarball is already present.
 ARCHIVE="trafficsites.tar.gz"
 if [ ! -f "$ARCHIVE" ]; then
   echo -e "$red Archive $ARCHIVE not found!$default"
   exit 1
 fi
 
-### Traffic WebHost Section (Option 7 Only)
+### Traffic WebHost Deployment Section (Option 7 Only)
 clear
 echo -e "$green Setting up Traffic Web Host server $default"
 sleep 2
 
-# Copy any additional files from WebHost folder (if needed)
-cp -r WebHost/* /root/
-
-# Update and install necessary packages
-apt update
-apt install -y apache2 python3-pip
-pip install gdown
-a2enmod ssl
-
-echo -e "$green Downloading websites now; this may take some time (~1.1GB download). $default"
-# (Replace gdown command with your desired method to obtain the tarball if needed)
-gdown 1__Z5LllzuOA_HnVA6YsC47toHsmEo99d
-echo -e "$green Download complete, extracting sites. $default"
-sleep 2
+# (Assumes that the websites tarball was generated during scraping.)
+# Do not download from gdown in deployment.
 tar -zxvf "$ARCHIVE" -C /var/www/html
 rm -f /var/www/html/index.html
 mv /var/www/html/websites.txt /tmp/
 
-# Ensure SSH keys exist and copy key to CA server.
+# Ensure SSH keys exist and copy public key to CA server.
 if [ ! -f /root/.ssh/id_rsa ]; then
-    ssh-keygen -b 1024 -t rsa -f /root/.ssh/id_rsa -q -N ""
+  ssh-keygen -b 1024 -t rsa -f /root/.ssh/id_rsa -q -N ""
 fi
 sshpass -p "$CAPass" ssh-copy-id -o StrictHostKeyChecking=no root@180.1.1.50
 
 # -------------------------------
-# Validate and Update websites.txt with Improved DNS Resolution
-# -------------------------------
-tempfile="/tmp/websites_new.txt"
-while IFS=, read -r domain ip; do
-    domain=$(echo "$domain" | xargs)
-    ip=$(echo "$ip" | xargs)
-    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "$domain,$ip" >> "$tempfile"
-    else
-        newip=$(dig +short A "$domain" | head -n1)
-        if [[ ! "$newip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            newip=$(host "$domain" 2>/dev/null | awk '/has address/ { print $4; exit }')
-        fi
-        if [[ ! "$newip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            newip=$(nslookup "$domain" 2>/dev/null | awk '/^Address: / { print $2; exit }')
-        fi
-        if [[ ! "$newip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            newip=$(getent ahosts "$domain" | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ { print $1; exit }')
-        fi
-        if [[ "$newip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "$domain,$newip" >> "$tempfile"
-        else
-            echo "Warning: Could not resolve $domain" >> /tmp/websites_errors.log
-        fi
-    fi
-done < /tmp/websites.txt
-mv "$tempfile" /tmp/websites.txt
-
-# -------------------------------
 # Set Up Basic Networking for Traffic WebHost
 # -------------------------------
+# Set loopback and configure primary NIC for DHCP.
 echo -e "auto lo\niface lo inet loopback\n\nauto $anic\niface $anic inet dhcp" > /etc/network/interfaces
 
-# Extract domains, IPs, and routes from websites.txt.
-routes=$(cut -d, -f2 /tmp/websites.txt | cut -d. -f1-3 | sort -t . -k1,1n -k2,2n -k3,3n | uniq)
-ips=$(cut -d, -f2 /tmp/websites.txt | sort -t . -k1,1n -k2,2n -k3,3n -k4,4n | uniq)
+# Extract domains, IPs, and routes from the pre-resolved websites.txt.
+routes=$(cut -d, -f2 /tmp/websites.txt | cut -d. -f1-3 | sort -t. -k1,1n -k2,2n -k3,3n | uniq)
+ips=$(cut -d, -f2 /tmp/websites.txt | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | uniq)
 domains=$(cut -d, -f1 /tmp/websites.txt | sort | uniq)
 
-echo -e "$green Configuring IPs. $default"
+echo -e "$green Configuring IPs on secondary interface ($gnic). $default"
 count=0
 cidr=24
 for ip in $ips; do
-    if [[ $count == 0 ]]; then
+    if [ $count -eq 0 ]; then
         echo -e "\nauto $gnic\niface $gnic inet static\n\taddress $ip/$cidr" >> /etc/network/interfaces
         first3octets=$(echo $ip | cut -d. -f1,2,3)
         gw="$first3octets.1"
@@ -235,7 +195,7 @@ httpsconf="TG_HTTPS.conf"
 > $httpsconf
 for domain in $domains; do 
     tld=$(echo "$domain" | sed 's/www.//g')
-    # HTTP configuration.
+    # HTTP virtual host configuration.
     echo "<VirtualHost *:80>" >> $httpconf
     echo "    ServerAdmin webmaster@$tld" >> $httpconf
     echo "    ServerName $tld" >> $httpconf
@@ -244,7 +204,7 @@ for domain in $domains; do
     echo "    ErrorLog \${APACHE_LOG_DIR}/error.log" >> $httpconf
     echo "    CustomLog \${APACHE_LOG_DIR}/access.log combined" >> $httpconf
     echo "</VirtualHost>" >> $httpconf
-    # HTTPS configuration.
+    # HTTPS virtual host configuration.
     echo "<VirtualHost *:443>" >> $httpsconf
     echo "    ServerName \"$tld\"" >> $httpsconf
     echo "    ServerAlias \"www.$tld\"" >> $httpsconf
