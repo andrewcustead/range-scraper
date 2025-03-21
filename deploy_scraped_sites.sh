@@ -12,11 +12,109 @@
 # Usage: ./deploy_scraped_sites.sh
 
 # === CONFIGURATION VARIABLES ===
-CAPass="YourCAPassword"       # CA server password
-SIPass="YourSIPassword"       # SI router password
-DNSPass="YourDNSPassword"     # DNS server password
-anic="your_anic_interface"    # e.g., eth0
-gnic="your_gnic_interface"    # e.g., eth1
+#!/bin/bash
+clear
+### Cobalt Strike variables
+CSURL="https://download.cobaltstrike.com"
+### User customization Variable section
+## Change this if you don't want to use the defaults.  This should set it up correctly, but not throughly tested.
+
+# Proxy settings for the Range.
+ProxyIP="172.30.0.2"
+ProxySub="21"
+ProxyNetID="172.30.0.0"
+ProxyPort="9999"
+
+# Root password
+MasterRootPass="toor"
+
+# Certificate Authority Variables
+CA="globalcert.com"
+cac="US"                 	# Country for cert
+cast="Oregon"			# State for cert
+cal="Seattle"			# Locality (city)
+cao="Global Certificates, Inc"	# Organization
+caou="Root Cert"		# Organizational unit
+capempass="password"
+
+#### End of user customization section - mess with variables below at your own peril.
+
+Proxy="http://$ProxyIP:$ProxyPort"
+CAPass=$MasterRootPass
+DNSPass=$MasterRootPass
+SIPass=$MasterRootPass
+# Network Interfaces for various builds.
+# IA Proxy IP settings
+iapnic1="$ProxyIP/$ProxySub"
+iapnic2="dhcp"
+# Root DNS IP Settings
+rootdnsnic1="dhcp"
+rootdnsnic2="8.8.8.8/24
+             198.41.0.4/24  
+             199.9.14.201/24 
+             192.33.4.12/24 
+             199.7.91.13/24 
+             192.203.230.10/24 
+             195.5.5.241/24 
+             192.112.36.4/24
+             198.97.190.53/24 
+             192.36.148.17/24 
+             192.58.128.30/24 
+             193.0.14.129/24 
+             199.7.83.42/24 
+             202.12.27.33/24"
+rootdnsgw="8.8.8.1"
+
+# CA server
+canic1="dhcp"
+canic2="180.1.1.50/24"
+caip="180.1.1.50"
+cagw="180.1.1.1"
+
+# RTS
+rtsnic1="dhcp"
+# Randomize an IP for the 5.29.0.1/20 IP range (this range is routable via the SI-router
+oct3=`shuf -i 0-15 -n 1`
+oct4=`shuf -i 2-254 -n 1`
+rtsnic2="5.29.$oct3.$oct4/20"
+rtsgw="5.29.0.1"
+# Web Servers
+webnic1="dhcp"
+webnic2="180.1.1.100/24
+        180.1.1.110/24
+        180.1.1.120/24
+        180.1.1.130/24
+	    180.1.1.140/24
+        180.1.1.150/24"
+webgw="180.1.1.1"
+owncloudIP="180.1.1.100"
+pastebinIP="180.1.1.110"
+redbookIP="180.1.1.120"
+drawioIP="180.1.1.130"
+ntpIP="180.1.1.140"
+mssitesIP="180.1.1.150"
+
+# Traffic Gen
+trafnic1="dhcp"
+trafnic2="92.107.127.12/24
+          72.32.4.26/24
+	  67.23.44.93/24
+	  70.32.91.153/24
+	  188.65.120.83/24"
+trafgw="92.107.127.1"
+
+# Web host
+webhostnic1="dhcp"
+webhostnic2="92.107.127.100/24"
+webhostgw="92.107.127.1"
+
+# Color codes for menu
+white="\e[1;37m"
+ltblue="\e[1;36m"
+red="\e[1;31m"
+green="\e[1;32m"
+yellow="\e[1;32m"
+default="\e[0m"
 
 ARCHIVE="trafficsites.tar.gz"
 
