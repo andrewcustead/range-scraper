@@ -1,14 +1,10 @@
 #!/bin/bash
-# This script is to be run on the VM that does NOT have Internet access.
-# It expects the tarball (trafficsites.tar.gz) produced by the scrape_and_package script to be present locally.
-# It extracts the archive into /var/www/html and then continues with the remaining configuration:
-# - Removing the default index file.
-# - Moving websites.txt for processing.
-# - Optionally copying additional files (e.g., WebHost/ if available).
-# - Using the contents of websites.txt to configure network interfaces, Apache virtual hosts,
-#   generate (or use existing) SSH keys, obtain SSL certificates, and register domains.
-#
-# Adjust the following variables as needed.
+clear
+### Cobalt Strike variables
+CSURL="https://download.cobaltstrike.com"
+
+### User customization Variable section
+## Change these if you don’t want to use the defaults.
 # Proxy settings for the Range.
 ProxyIP="172.30.0.2"
 ProxySub="21"
@@ -27,16 +23,18 @@ cao="Global Certificates, Inc"	# Organization
 caou="Root Cert"		# Organizational unit
 capempass="password"
 
-#### End of user customization section - mess with variables below at your own peril.
+#### End of user customization section.
 
 Proxy="http://$ProxyIP:$ProxyPort"
 CAPass=$MasterRootPass
 DNSPass=$MasterRootPass
 SIPass=$MasterRootPass
+
 # Network Interfaces for various builds.
 # IA Proxy IP settings
 iapnic1="$ProxyIP/$ProxySub"
 iapnic2="dhcp"
+
 # Root DNS IP Settings
 rootdnsnic1="dhcp"
 rootdnsnic2="8.8.8.8/24
@@ -63,18 +61,18 @@ cagw="180.1.1.1"
 
 # RTS
 rtsnic1="dhcp"
-# Randomize an IP for the 5.29.0.1/20 IP range (this range is routable via the SI-router
-oct3=`shuf -i 0-15 -n 1`
-oct4=`shuf -i 2-254 -n 1`
+oct3=$(shuf -i 0-15 -n 1)
+oct4=$(shuf -i 2-254 -n 1)
 rtsnic2="5.29.$oct3.$oct4/20"
 rtsgw="5.29.0.1"
+
 # Web Servers
 webnic1="dhcp"
 webnic2="180.1.1.100/24
         180.1.1.110/24
         180.1.1.120/24
         180.1.1.130/24
-	    180.1.1.140/24
+        180.1.1.140/24
         180.1.1.150/24"
 webgw="180.1.1.1"
 owncloudIP="180.1.1.100"
@@ -88,9 +86,9 @@ mssitesIP="180.1.1.150"
 trafnic1="dhcp"
 trafnic2="92.107.127.12/24
           72.32.4.26/24
-	  67.23.44.93/24
-	  70.32.91.153/24
-	  188.65.120.83/24"
+          67.23.44.93/24
+          70.32.91.153/24
+          188.65.120.83/24"
 trafgw="92.107.127.1"
 
 # Web host
@@ -98,7 +96,7 @@ webhostnic1="dhcp"
 webhostnic2="92.107.127.100/24"
 webhostgw="92.107.127.1"
 
-# Color codes for menu
+# Color codes for output
 white="\e[1;37m"
 ltblue="\e[1;36m"
 red="\e[1;31m"
@@ -106,135 +104,185 @@ green="\e[1;32m"
 yellow="\e[1;32m"
 default="\e[0m"
 
-# Check if the archive exists.
+# Determine primary (anic) and secondary (gnic) network interfaces.
+anic=$(ip link show | grep ^2: | awk '{print $2}' | cut -d: -f1)
+if [ -z "$anic" ]; then
+  echo -e "$red Error: Could not determine your first NIC.$default"
+  exit 1
+fi
+gnic=$(ip link show | grep ^3: | awk '{print $2}' | cut -d: -f1)
+if [ -z "$gnic" ]; then
+  echo -e "$red Error: Second NIC not detected. Ensure you have added one for this VM.$default"
+  exit 1
+fi
+
+# Archive name (assumes the tarball is in the current directory)
+ARCHIVE="trafficsites.tar.gz"
 if [ ! -f "$ARCHIVE" ]; then
-  echo "Archive $ARCHIVE not found!"
+  echo -e "$red Archive $ARCHIVE not found!$default"
   exit 1
 fi
 
-echo "Extracting archive to /var/www/html ..."
-tar -xzvf "$ARCHIVE" -C /var/www/html
+### Traffic WebHost Section (Option 7 Only)
+clear
+echo -e "$green Setting up Traffic Web Host server $default"
+sleep 2
 
-# Remove the default index file, if it exists.
+# Copy any additional files from WebHost folder (if needed)
+cp -r WebHost/* /root/
+
+# Update and install necessary packages
+apt update
+apt install -y apache2 python3-pip
+pip install gdown
+a2enmod ssl
+
+echo -e "$green Downloading websites now; this may take some time (~1.1GB download). $default"
+# (Replace gdown command with your desired method to obtain the tarball if needed)
+gdown 1__Z5LllzuOA_HnVA6YsC47toHsmEo99d
+echo -e "$green Download complete, extracting sites. $default"
+sleep 2
+tar -zxvf "$ARCHIVE" -C /var/www/html
 rm -f /var/www/html/index.html
+mv /var/www/html/websites.txt /tmp/
 
-# Move the websites.txt file to /tmp for further processing.
-if [ -f /var/www/html/websites.txt ]; then
-  mv /var/www/html/websites.txt /tmp/
-else
-  echo "websites.txt not found in extracted files."
-  exit 1
-fi
-
-# If a WebHost folder exists locally (if required by your configuration), copy its contents to /root/
-if [ -d "WebHost" ]; then
-  cp -r WebHost/* /root/
-fi
-
-# Generate SSH keys if they do not exist.
+# Ensure SSH keys exist and copy key to CA server.
 if [ ! -f /root/.ssh/id_rsa ]; then
-  ssh-keygen -b 1024 -t rsa -f /root/.ssh/id_rsa -q -N ""
+    ssh-keygen -b 1024 -t rsa -f /root/.ssh/id_rsa -q -N ""
 fi
-
-# Copy SSH key to the CA server.
 sshpass -p "$CAPass" ssh-copy-id -o StrictHostKeyChecking=no root@180.1.1.50
 
-# Configure basic networking in /etc/network/interfaces.
+# -------------------------------
+# Validate and Update websites.txt with Improved DNS Resolution
+# -------------------------------
+tempfile="/tmp/websites_new.txt"
+while IFS=, read -r domain ip; do
+    domain=$(echo "$domain" | xargs)
+    ip=$(echo "$ip" | xargs)
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$domain,$ip" >> "$tempfile"
+    else
+        newip=$(dig +short A "$domain" | head -n1)
+        if [[ ! "$newip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            newip=$(host "$domain" 2>/dev/null | awk '/has address/ { print $4; exit }')
+        fi
+        if [[ ! "$newip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            newip=$(nslookup "$domain" 2>/dev/null | awk '/^Address: / { print $2; exit }')
+        fi
+        if [[ ! "$newip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            newip=$(getent ahosts "$domain" | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ { print $1; exit }')
+        fi
+        if [[ "$newip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$domain,$newip" >> "$tempfile"
+        else
+            echo "Warning: Could not resolve $domain" >> /tmp/websites_errors.log
+        fi
+    fi
+done < /tmp/websites.txt
+mv "$tempfile" /tmp/websites.txt
+
+# -------------------------------
+# Set Up Basic Networking for Traffic WebHost
+# -------------------------------
 echo -e "auto lo\niface lo inet loopback\n\nauto $anic\niface $anic inet dhcp" > /etc/network/interfaces
 
-# Process websites.txt to extract domains, IPs, and routes.
+# Extract domains, IPs, and routes from websites.txt.
 routes=$(cut -d, -f2 /tmp/websites.txt | cut -d. -f1-3 | sort -t . -k1,1n -k2,2n -k3,3n | uniq)
 ips=$(cut -d, -f2 /tmp/websites.txt | sort -t . -k1,1n -k2,2n -k3,3n -k4,4n | uniq)
 domains=$(cut -d, -f1 /tmp/websites.txt | sort | uniq)
 
-echo "Configuring IPs in /etc/network/interfaces..."
+echo -e "$green Configuring IPs. $default"
 count=0
 cidr=24
 for ip in $ips; do
-  if [ $count -eq 0 ]; then
-    echo -e "\nauto $gnic\niface $gnic inet static\n\taddress $ip/$cidr" >> /etc/network/interfaces
-    first3octets=$(echo $ip | cut -d. -f1,2,3)
-    gw="$first3octets.1"
-    echo -e "\tgateway $gw" >> /etc/network/interfaces
-    count=1
-  else
-    echo -e "\nauto $gnic:$count\niface $gnic:$count inet static\n\taddress $ip/$cidr" >> /etc/network/interfaces
-    count=$((count+1))
-  fi
+    if [[ $count == 0 ]]; then
+        echo -e "\nauto $gnic\niface $gnic inet static\n\taddress $ip/$cidr" >> /etc/network/interfaces
+        first3octets=$(echo $ip | cut -d. -f1,2,3)
+        gw="$first3octets.1"
+        echo -e "\tgateway $gw" >> /etc/network/interfaces
+        count=1
+    else
+        echo -e "\nauto $gnic:$count\niface $gnic:$count inet static\n\taddress $ip/$cidr" >> /etc/network/interfaces
+        count=$((count+1))
+    fi
 done
 
-echo "Configuring routes for the SI router..."
+# -------------------------------
+# Build and Deploy SI-Router Routes Script
+# -------------------------------
+echo -e "$green Configuring routes for the SI_router. $default"
 SI_SCRIPT="/tmp/Eth1TrafficWebHosts.sh"
 echo "#!/bin/vbash" > "$SI_SCRIPT"
 echo "source /opt/vyatta/etc/functions/script-template" >> "$SI_SCRIPT"
 echo "configure" >> "$SI_SCRIPT"
 chmod 755 "$SI_SCRIPT"
 for subnet in $routes; do
-  echo "set interfaces ethernet eth1 address $subnet.1/24" >> "$SI_SCRIPT"
+    echo "set interfaces ethernet eth1 address $subnet.1/24" >> "$SI_SCRIPT"
 done
 echo "commit" >> "$SI_SCRIPT"
 echo "save" >> "$SI_SCRIPT"
 echo "exit" >> "$SI_SCRIPT"
-
 sshpass -p "$SIPass" scp -o StrictHostKeyChecking=no "$SI_SCRIPT" vyos@172.30.7.254:/home/vyos/Scripts/
 sshpass -p "$SIPass" ssh -o StrictHostKeyChecking=no vyos@172.30.7.254 '/home/vyos/Scripts/Eth1TrafficWebHosts.sh'
 
-echo "Configuring Apache virtual hosts and generating SSL certificates..."
+# -------------------------------
+# Configure Apache Virtual Hosts and Obtain SSL Certificates
+# -------------------------------
+echo -e "$green Configuring Apache Web server and generating SSL certificates via the CA-Server. $default"
 httpconf="TG_HTTP.conf"
 httpsconf="TG_HTTPS.conf"
 > $httpconf
 > $httpsconf
-for domain in $domains; do
-  tld=$(echo "$domain" | sed 's/www.//g')
-  # Configure HTTP virtual host.
-  echo "<VirtualHost *:80>" >> $httpconf
-  echo "    ServerAdmin webmaster@$tld" >> $httpconf
-  echo "    ServerName $tld" >> $httpconf
-  echo "    ServerAlias www.$tld" >> $httpconf
-  echo "    DocumentRoot /var/www/html/$tld" >> $httpconf
-  echo "    ErrorLog \${APACHE_LOG_DIR}/error.log" >> $httpconf
-  echo "    CustomLog \${APACHE_LOG_DIR}/access.log combined" >> $httpconf
-  echo "</VirtualHost>" >> $httpconf
-
-  # Configure HTTPS virtual host.
-  echo "<VirtualHost *:443>" >> $httpsconf
-  echo "    ServerName \"$tld\"" >> $httpsconf
-  echo "    ServerAlias \"www.$tld\"" >> $httpsconf
-  echo "    ServerAdmin webmaster@$tld" >> $httpsconf
-  echo "    DocumentRoot /var/www/html/$tld" >> $httpsconf
-  echo "    ErrorLog \${APACHE_LOG_DIR}/error.log" >> $httpsconf
-  echo "    CustomLog \${APACHE_LOG_DIR}/access.log combined" >> $httpsconf
-  echo "    SSLEngine on" >> $httpsconf
-  echo "    SSLCertificateFile /etc/ssl/certs/$tld.crt" >> $httpsconf
-  echo "    SSLCertificateKeyFile /etc/ssl/private/$tld.key" >> $httpsconf
-  echo "</VirtualHost>" >> $httpsconf
-
-  # Generate and retrieve SSL certificates via the CA server.
-  sshpass -p "$CAPass" ssh root@180.1.1.50 "/root/scripts/certmaker.sh -d $tld -q -r"
-  sshpass -p "$CAPass" scp root@180.1.1.50:/var/www/html/$tld.crt /etc/ssl/certs/
-  sshpass -p "$CAPass" scp root@180.1.1.50:/var/www/html/$tld.key /etc/ssl/private/
+for domain in $domains; do 
+    tld=$(echo "$domain" | sed 's/www.//g')
+    # HTTP configuration.
+    echo "<VirtualHost *:80>" >> $httpconf
+    echo "    ServerAdmin webmaster@$tld" >> $httpconf
+    echo "    ServerName $tld" >> $httpconf
+    echo "    ServerAlias www.$tld" >> $httpconf
+    echo "    DocumentRoot /var/www/html/$tld" >> $httpconf
+    echo "    ErrorLog \${APACHE_LOG_DIR}/error.log" >> $httpconf
+    echo "    CustomLog \${APACHE_LOG_DIR}/access.log combined" >> $httpconf
+    echo "</VirtualHost>" >> $httpconf
+    # HTTPS configuration.
+    echo "<VirtualHost *:443>" >> $httpsconf
+    echo "    ServerName \"$tld\"" >> $httpsconf
+    echo "    ServerAlias \"www.$tld\"" >> $httpsconf
+    echo "    ServerAdmin webmaster@$tld" >> $httpsconf
+    echo "    DocumentRoot /var/www/html/$tld" >> $httpsconf
+    echo "    ErrorLog \${APACHE_LOG_DIR}/error.log" >> $httpsconf
+    echo "    CustomLog \${APACHE_LOG_DIR}/access.log combined" >> $httpsconf
+    echo "    SSLEngine on" >> $httpsconf
+    echo "    SSLCertificateFile /etc/ssl/certs/$tld.crt" >> $httpsconf
+    echo "    SSLCertificateKeyFile /etc/ssl/private/$tld.key" >> $httpsconf
+    echo "</VirtualHost>" >> $httpsconf
+    # Request and retrieve SSL certificate via the CA server.
+    sshpass -p "$CAPass" ssh root@180.1.1.50 "/root/scripts/certmaker.sh -d $tld -q -r"
+    sshpass -p "$CAPass" scp root@180.1.1.50:/var/www/html/$tld.crt /etc/ssl/certs/
+    sshpass -p "$CAPass" scp root@180.1.1.50:/var/www/html/$tld.key /etc/ssl/private/
 done
-
 mv $httpconf /etc/apache2/sites-available/
 mv $httpsconf /etc/apache2/sites-available/
 a2ensite $httpconf
 a2ensite $httpsconf
 
-# Flush IP addresses and restart networking.
+# -------------------------------
+# Restart Networking and Apache
+# -------------------------------
 ip addr flush $anic
 ip addr flush $gnic
 service networking restart
 systemctl reload apache2
 
 clear
-echo "Registering domains on RootDNS server..."
+echo -e "$green Registering domains on RootDNS server. $default"
 sshpass -p "$DNSPass" scp -o StrictHostKeyChecking=no /tmp/websites.txt 198.41.0.4:/root/scripts/
 sshpass -p "$DNSPass" ssh -o StrictHostKeyChecking=no 198.41.0.4 '/root/scripts/add-TRAFFIC-DNS.sh /root/scripts/websites.txt'
 
 clear
-echo "Setting up SSL certificate renewal automation Cron job..."
+echo -e "$green Setting up SSL cert renewal automation Cron job $default"
 crontab -l > cronjbs
 echo "0 2 * * * /root/scripts/SSLcheck.sh" >> cronjbs
 crontab cronjbs
 
-echo "Installation Complete!"
+echo -e "$green Installation Complete! $default"
