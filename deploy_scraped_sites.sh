@@ -3,8 +3,7 @@ clear
 ### Cobalt Strike variables
 CSURL="https://download.cobaltstrike.com"
 
-### User Customization Variable Section
-## Change these if you don’t want to use the defaults.
+### User Customization Variables
 # Proxy settings for the Range.
 ProxyIP="172.30.0.2"
 ProxySub="21"
@@ -16,14 +15,14 @@ MasterRootPass="toor"
 
 # Certificate Authority Variables
 CA="globalcert.com"
-cac="US"                 	# Country for cert
-cast="Oregon"			# State for cert
-cal="Seattle"			# Locality (city)
-cao="Global Certificates, Inc"	# Organization
-caou="Root Cert"		# Organizational unit
+cac="US"                   # Country for cert
+cast="Oregon"              # State for cert
+cal="Seattle"              # Locality (city)
+cao="Global Certificates, Inc"  # Organization
+caou="Root Cert"           # Organizational unit
 capempass="password"
 
-#### End of user customization section.
+#### End of User Customization Section
 
 Proxy="http://$ProxyIP:$ProxyPort"
 CAPass=$MasterRootPass
@@ -53,7 +52,7 @@ rootdnsnic2="8.8.8.8/24
              202.12.27.33/24"
 rootdnsgw="8.8.8.1"
 
-# CA server
+# CA Server
 canic1="dhcp"
 canic2="180.1.1.50/24"
 caip="180.1.1.50"
@@ -91,7 +90,7 @@ trafnic2="92.107.127.12/24
           188.65.120.83/24"
 trafgw="92.107.127.1"
 
-# Web host
+# Web Host (Traffic WebHost)
 webhostnic1="dhcp"
 webhostnic2="92.107.127.100/24"
 webhostgw="92.107.127.1"
@@ -104,7 +103,7 @@ green="\e[1;32m"
 yellow="\e[1;32m"
 default="\e[0m"
 
-# Determine primary (anic) and secondary (gnic) network interface names.
+# Determine primary (anic) and secondary (gnic) network interfaces.
 anic=$(ip link show | grep ^2: | awk '{print $2}' | cut -d: -f1)
 if [ -z "$anic" ]; then
   echo -e "$red Error: Could not determine your first NIC.$default"
@@ -116,46 +115,55 @@ if [ -z "$gnic" ]; then
   exit 1
 fi
 
-# Archive name – assumes the tarball is already present.
+# Archive name – assume the tarball (trafficsites.tar.gz) is pre-generated and in the current directory.
 ARCHIVE="trafficsites.tar.gz"
 if [ ! -f "$ARCHIVE" ]; then
   echo -e "$red Archive $ARCHIVE not found!$default"
   exit 1
 fi
 
-### Traffic WebHost Deployment Section (Option 7 Only)
+### Begin Traffic WebHost Deployment (Option 7 Only)
 clear
 echo -e "$green Setting up Traffic Web Host server $default"
 sleep 2
 
-# (Assumes that the websites tarball was generated during scraping.)
-# Do not download from gdown in deployment.
+# Copy any additional files from WebHost folder (if needed)
+[ -d "WebHost" ] && cp -r WebHost/* /root/
+
+# Update package lists and install required packages.
+apt update
+apt install -y apache2 python3-pip
+# (No gdown here because the tarball is already provided.)
+a2enmod ssl
+
+echo -e "$green Extracting sites from archive. $default"
+sleep 2
 tar -zxvf "$ARCHIVE" -C /var/www/html
 rm -f /var/www/html/index.html
 mv /var/www/html/websites.txt /tmp/
 
-# Ensure SSH keys exist and copy public key to CA server.
+# Generate SSH keys if they do not exist and copy key to CA server.
 if [ ! -f /root/.ssh/id_rsa ]; then
-  ssh-keygen -b 1024 -t rsa -f /root/.ssh/id_rsa -q -N ""
+    ssh-keygen -b 1024 -t rsa -f /root/.ssh/id_rsa -q -N ""
 fi
 sshpass -p "$CAPass" ssh-copy-id -o StrictHostKeyChecking=no root@180.1.1.50
 
 # -------------------------------
-# Set Up Basic Networking for Traffic WebHost
+# Set Up Basic Networking
 # -------------------------------
-# Set loopback and configure primary NIC for DHCP.
 echo -e "auto lo\niface lo inet loopback\n\nauto $anic\niface $anic inet dhcp" > /etc/network/interfaces
 
-# Extract domains, IPs, and routes from the pre-resolved websites.txt.
-routes=$(cut -d, -f2 /tmp/websites.txt | cut -d. -f1-3 | sort -t. -k1,1n -k2,2n -k3,3n | uniq)
-ips=$(cut -d, -f2 /tmp/websites.txt | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | uniq)
+# Assume that websites.txt already contains pre‑resolved domain,IP pairs.
+# Separate the list into routes, ips, and domains.
+routes=$(cut -d, -f2 /tmp/websites.txt | cut -d. -f1-3 | sort -t . -k1,1n -k2,2n -k3,3n | uniq)
+ips=$(cut -d, -f2 /tmp/websites.txt | sort -t . -k1,1n -k2,2n -k3,3n -k4,4n | uniq)
 domains=$(cut -d, -f1 /tmp/websites.txt | sort | uniq)
 
-echo -e "$green Configuring IPs on secondary interface ($gnic). $default"
+echo -e "$green Configuring static IPs on secondary NIC ($gnic). $default"
 count=0
 cidr=24
 for ip in $ips; do
-    if [ $count -eq 0 ]; then
+    if [[ $count == 0 ]]; then
         echo -e "\nauto $gnic\niface $gnic inet static\n\taddress $ip/$cidr" >> /etc/network/interfaces
         first3octets=$(echo $ip | cut -d. -f1,2,3)
         gw="$first3octets.1"
@@ -168,7 +176,7 @@ for ip in $ips; do
 done
 
 # -------------------------------
-# Build and Deploy SI-Router Routes Script
+# Build SI-Router Routes Script
 # -------------------------------
 echo -e "$green Configuring routes for the SI_router. $default"
 SI_SCRIPT="/tmp/Eth1TrafficWebHosts.sh"
@@ -186,7 +194,7 @@ sshpass -p "$SIPass" scp -o StrictHostKeyChecking=no "$SI_SCRIPT" vyos@172.30.7.
 sshpass -p "$SIPass" ssh -o StrictHostKeyChecking=no vyos@172.30.7.254 '/home/vyos/Scripts/Eth1TrafficWebHosts.sh'
 
 # -------------------------------
-# Configure Apache Virtual Hosts and Obtain SSL Certificates
+# Configure Apache Virtual Hosts and Generate SSL Certificates
 # -------------------------------
 echo -e "$green Configuring Apache Web server and generating SSL certificates via the CA-Server. $default"
 httpconf="TG_HTTP.conf"
@@ -195,7 +203,7 @@ httpsconf="TG_HTTPS.conf"
 > $httpsconf
 for domain in $domains; do 
     tld=$(echo "$domain" | sed 's/www.//g')
-    # HTTP virtual host configuration.
+    # HTTP configuration.
     echo "<VirtualHost *:80>" >> $httpconf
     echo "    ServerAdmin webmaster@$tld" >> $httpconf
     echo "    ServerName $tld" >> $httpconf
@@ -204,7 +212,7 @@ for domain in $domains; do
     echo "    ErrorLog \${APACHE_LOG_DIR}/error.log" >> $httpconf
     echo "    CustomLog \${APACHE_LOG_DIR}/access.log combined" >> $httpconf
     echo "</VirtualHost>" >> $httpconf
-    # HTTPS virtual host configuration.
+    # HTTPS configuration.
     echo "<VirtualHost *:443>" >> $httpsconf
     echo "    ServerName \"$tld\"" >> $httpsconf
     echo "    ServerAlias \"www.$tld\"" >> $httpsconf
@@ -216,7 +224,7 @@ for domain in $domains; do
     echo "    SSLCertificateFile /etc/ssl/certs/$tld.crt" >> $httpsconf
     echo "    SSLCertificateKeyFile /etc/ssl/private/$tld.key" >> $httpsconf
     echo "</VirtualHost>" >> $httpsconf
-    # Request and retrieve SSL certificate via the CA server.
+    # Generate SSL Cert for the domain (using the CA server) as in the original script.
     sshpass -p "$CAPass" ssh root@180.1.1.50 "/root/scripts/certmaker.sh -d $tld -q -r"
     sshpass -p "$CAPass" scp root@180.1.1.50:/var/www/html/$tld.crt /etc/ssl/certs/
     sshpass -p "$CAPass" scp root@180.1.1.50:/var/www/html/$tld.key /etc/ssl/private/
